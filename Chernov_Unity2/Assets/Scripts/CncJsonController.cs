@@ -5,19 +5,18 @@ using Newtonsoft.Json.Linq;
 using UnityEngine;
 using UnityEngine.Networking;
 
+// Клиент сервера станка (занятие 09.11): по GET-запросу получает JSON, находит координаты осей X, Y, Z, двигает узлы станка и передаёт данные на панель.
 public class CncJsonController : MonoBehaviour
 {
     public string url = "https://cnc.kovalev.team/get/3";
-    public string commandUrl = "";
     public int channel = 1;
     public float interval = 0.5f;
     public Transform nodeX;
     public Transform nodeZ;
     public MachinePanel panel;
-    public bool vyvod = false;   // true - координаты получаются и выводятся
+    public bool applyMovement = true;
     private Vector3 startX;
     private Vector3 startZ;
-    private bool netSvyazi = false;
 
     private IEnumerator Start()
     {
@@ -28,16 +27,9 @@ public class CncJsonController : MonoBehaviour
         }
         startX = nodeX.localPosition;
         startZ = nodeZ.localPosition;
-        if (panel != null) panel.ShowMessage("Нажмите «Пуск», чтобы получать координаты");
 
         while (true)
         {
-            if (!vyvod)
-            {
-                yield return null;
-                continue;
-            }
-
             using (UnityWebRequest request = UnityWebRequest.Get(url))
             {
                 request.timeout = 10;
@@ -51,13 +43,15 @@ public class CncJsonController : MonoBehaviour
                     catch (Exception error)
                     {
                         Debug.LogWarning("Ошибка чтения JSON: " + error.Message);
+                        if (panel != null)
+                            panel.ShowReadError("Ошибка формата данных");
                     }
                 }
                 else
                 {
                     Debug.LogWarning("Ошибка запроса: " + request.error);
-                    if (panel != null) panel.ShowNoConnection(request.error);
-                    netSvyazi = true;
+                    if (panel != null)
+                        panel.ShowReadError("Нет связи с API");
                 }
             }
             yield return new WaitForSecondsRealtime(Mathf.Max(0.1f, interval));
@@ -87,7 +81,7 @@ public class CncJsonController : MonoBehaviour
         throw new FormatException("Не найдена координата " + axis);
     }
 
-    // состояние канала: «Работа», «Готов», «Останов», «Ошибка»
+    // раздел «Канал 1», строка «Статус канала»
     private string GetStatus(JObject data)
     {
         foreach (JToken section in data["data"])
@@ -109,59 +103,16 @@ public class CncJsonController : MonoBehaviour
         JObject data = JObject.Parse(json);
         // токарный станок: X - поперечные салазки к детали, Z - каретка вдоль станка
         float x = GetCoordinate(data, "X") * 0.001f;
+        float y = GetCoordinate(data, "Y") * 0.001f;
         float z = GetCoordinate(data, "Z") * 0.001f;
-        nodeX.localPosition = startX + Vector3.forward * x;
-        nodeZ.localPosition = startZ + Vector3.left * z;
-
         if (panel != null)
         {
-            MachineState state = new MachineState();
-            state.running = GetStatus(data) == "Работа";
-            state.x = GetCoordinate(data, "X");
-            state.y = GetCoordinate(data, "Y");
-            state.z = GetCoordinate(data, "Z");
-            Debug.Log($"X={state.x}, Y={state.y}, Z={state.z}");
-            panel.ShowState(state);
-            if (netSvyazi)
-            {
-                panel.ShowMessage("Связь восстановлена");
-                netSvyazi = false;
-            }
+            panel.ShowCoordinatesMeters(x, y, z, channel);
+            string status = GetStatus(data);
+            if (status != "") panel.ShowStatus(status);
         }
-    }
-
-    // Пуск: начать получать и выводить координаты
-    public void StartMachine()
-    {
-        vyvod = true;
-        panel.ShowMessage("Вывод координат запущен");
-        if (!string.IsNullOrEmpty(commandUrl)) StartCoroutine(SendCommand("start"));
-    }
-
-    // Стоп: остановить вывод, координаты остаются последними
-    public void StopMachine()
-    {
-        vyvod = false;
-        panel.ShowMessage("Вывод координат остановлен");
-        if (!string.IsNullOrEmpty(commandUrl)) StartCoroutine(SendCommand("stop"));
-    }
-
-    // команда на сервер, если в Inspector задан адрес commandUrl
-    private IEnumerator SendCommand(string command)
-    {
-        string body = "{\"command\":\"" + command + "\"}";
-        using (UnityWebRequest req = UnityWebRequest.Post(commandUrl, body, "application/json"))
-        {
-            req.timeout = 10;
-            panel.ShowMessage("Отправка команды…");
-            Debug.Log("POST " + commandUrl + " " + body);
-            yield return req.SendWebRequest();
-            if (req.result != UnityWebRequest.Result.Success)
-            {
-                panel.ShowMessage("Ошибка команды: " + req.error);
-                yield break;
-            }
-            panel.ShowMessage("Команда принята. Ожидание состояния…");
-        }
+        if (!applyMovement) return;
+        nodeX.localPosition = startX + Vector3.forward * x;
+        nodeZ.localPosition = startZ + Vector3.left * z;
     }
 }

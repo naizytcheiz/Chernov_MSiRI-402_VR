@@ -1,27 +1,72 @@
 using TMPro;
 using UnityEngine;
 
+// Панель станка World Space (занятие 11.11): только показывает состояние, координаты, связь с API и последнюю команду.
 public class MachinePanel : MonoBehaviour
 {
-    public TMP_Text stateText, axesText, messageText;
+    public TMP_Text stateText, axesText;
+    public TMP_Text connectionText, commandText;
+    public float staleAfter = 3f;
 
-    public void ShowState(MachineState data)
+    private bool hasData;
+    private float lastSuccess;
+    private string axesValue;
+
+    private void Awake()
     {
-        stateText.text = data.running ? "Работает" : "Остановлен";
-        axesText.text = $"X: {data.x:F1} мм\n" +
-            $"Y: {data.y:F1} мм\nZ: {data.z:F1} мм";
-        axesText.alpha = 1f;
+        stateText.text = "Статус из API не получен";
+        axesValue = "X: - мм\nY: - мм\nZ: - мм";
+        axesText.text = axesValue;
+        connectionText.text = "Ожидание первого ответа";
+        commandText.text = "";
     }
 
-    public void ShowMessage(string message)
+    public void ShowCoordinatesMeters(float x, float y, float z, int channel)
     {
-        messageText.text = message;
+        axesValue = $"Канал {channel}\n" +
+            $"X: {x * 1000f:F1} мм\n" +
+            $"Y: {y * 1000f:F1} мм\n" +
+            $"Z: {z * 1000f:F1} мм";
+        axesText.text = axesValue;
+        hasData = true;
+        lastSuccess = Time.unscaledTime;
+        connectionText.text = "Данные получены";
     }
 
-    // нет связи: последние координаты неактуальны
-    public void ShowNoConnection(string error)
+    public void ShowReadError(string reason)
     {
-        messageText.text = "Нет связи: " + error;
-        axesText.alpha = 0.4f;
+        connectionText.text = reason;
+        axesText.text = axesValue + (hasData ? "\nПоследние данные неактуальны" : "\nДанные ещё не получены");
+    }
+
+    private void Update()
+    {
+        if (hasData && Time.unscaledTime - lastSuccess > Mathf.Max(0.1f, staleAfter))
+        {
+            ShowReadError("Нет свежего ответа GET");
+        }
+    }
+
+    // статус канала из ответа API: «Работа», «Готов», «Останов», «Ошибка»
+    public bool showApiStatus = true;   // в сцене VR выключено: там строку занимают кнопки Пуск/Стоп
+
+    public void ShowStatus(string status)
+    {
+        if (showApiStatus) stateText.text = "Статус станка: " + status;
+    }
+
+    public void ShowCommand(string message)
+    {
+        commandText.text = message;
+    }
+
+    public void ShowDemoState(bool running)
+    {
+        stateText.text = running ? "Работает" : "Остановлен";
+    }
+
+    public void ShowConfirmedState(bool running)
+    {
+        stateText.text = running ? "По данным API Работает" : "По данным API Остановлен";
     }
 }
